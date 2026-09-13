@@ -1,0 +1,138 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.admin == true ||
+        request.auth.token.role == 'super_admin' ||
+        request.auth.token.email == 'omarkingx99@gmail.com'
+      );
+    }
+
+    // User profiles
+    match /users/{userId} {
+      // Anyone authenticated can read user profiles (for display and leaderboard)
+      allow read: if isAuthenticated();
+      // Users can only create their own profile with matching uid, or admin
+      allow create: if isOwner(userId) || isAdmin();
+      // Users can update their own profile and statistics, or admin
+      allow update: if isOwner(userId) || isAdmin();
+      // No client-side deletion
+      allow delete: if false;
+    }
+
+    // Admin Profiles
+    match /adminProfiles/{adminUid} {
+      allow read, write: if isAdmin();
+    }
+
+    // Admin Audit Logs (Append-Only: no update or delete allowed)
+    match /adminAuditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // Point Adjustments History (Append-Only)
+    match /pointAdjustments/{adjId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // Central Question Bank
+    match /questions/{questionId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Global Settings
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Announcements
+    match /announcements/{announcementId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Challenges
+    match /challenges/{challengeId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Exams
+    match /exams/{examId} {
+      // Authenticated users can read exams
+      allow read: if isAuthenticated();
+      // Only admins can create, update, or publish exams
+      allow create, update: if isAdmin();
+      allow delete: if false;
+
+      // Public question data
+      match /questions/{questionId} {
+        allow read: if isAuthenticated();
+        allow create, update, delete: if isAdmin();
+      }
+
+      // Protected answer keys - hidden from regular students, accessible only to admin
+      match /answerKeys/{questionId} {
+        allow read: if isAdmin();
+        allow create, update, delete: if isAdmin();
+      }
+    }
+
+    // AI Generation Jobs (Admin only)
+    match /aiGenerationJobs/{jobId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Exam Templates (Admin only)
+    match /examTemplates/{templateId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Exam attempts
+    match /attempts/{attemptId} {
+      // Students can read their own attempts; admins can inspect any attempt
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      
+      // Students can create an attempt for themselves
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      
+      // Students can update their attempt while in_progress (saving state or submitting)
+      allow update: if isAuthenticated() && (
+        (resource.data.userId == request.auth.uid && resource.data.status == 'in_progress') ||
+        isAdmin()
+      );
+        
+      allow delete: if false;
+
+      // Subcollection for answers during attempt
+      match /answers/{questionId} {
+        allow read: if isAuthenticated() && (
+          get(/databases/$(database)/documents/attempts/$(attemptId)).data.userId == request.auth.uid ||
+          isAdmin()
+        );
+        allow create, update: if isAuthenticated() && (
+          (get(/databases/$(database)/documents/attempts/$(attemptId)).data.userId == request.auth.uid &&
+           get(/databases/$(database)/documents/attempts/$(attemptId)).data.status == 'in_progress') ||
+          isAdmin()
+        );
+        allow delete: if false;
+      }
+    }
+  }
+}
+
